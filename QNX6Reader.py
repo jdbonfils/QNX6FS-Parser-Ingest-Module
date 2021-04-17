@@ -1,37 +1,3 @@
-# Sample module in the public domain. Feel free to use this as a template
-# for your modules (and you can remove this header and take complete credit
-# and liability)
-#
-# Contact: Brian Carrier [carrier <at> sleuthkit [dot] org]
-#
-# This is free and unencumbered software released into the public domain.
-#
-# Anyone is free to copy, modify, publish, use, compile, sell, or
-# distribute this software, either in source code form or as a compiled
-# binary, for any purpose, commercial or non-commercial, and by any
-# means.
-#
-# In jurisdictions that recognize copyright laws, the author or authors
-# of this software dedicate any and all copyright interest in the
-# software to the public domain. We make this dedication for the benefit
-# of the public at large and to the detriment of our heirs and
-# successors. We intend this dedication to be an overt act of
-# relinquishment in perpetuity of all present and future rights to this
-# software under copyright law.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-# IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
-# OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
-# ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
-# OTHER DEALINGS IN THE SOFTWARE.
-
-# Simple data source-level ingest module for Autopsy.
-# Used as part of Python tutorials from Basis Technology - August 2015
-# 
-# Looks for files of a given name, opens then in SQLite, queries the DB,
-# and makes artifacts
 from QNX6_FS import QNX6_FS
 from struct import *
 from datetime import datetime
@@ -119,23 +85,21 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
         sKCase = case.getSleuthkitCase()
         wDirPath = case.getModuleDirectory()
 
+        #Repertoire dans lequel extraire les donnees
+        realRootDir = wDirPath+"\\"+dataSource.getName()+"\\Partition0"
+        if(os.path.exists(realRootDir) == False):
+            try: 
+                os.makedirs(realRootDir)
+            except OSError as e:
+                pass 
+
         #Recuper le diskimg au format AbstractFile
         fileManager = case.getServices().getFileManager()
         qnx6Img = fileManager.findFiles(dataSource, "%%")[0]
 
-        #sKCase.addAttrType("Striddddngdd "," String dispfflayName")
-        
-        #artIdAD1 = Case.getCurrentCase().getSleuthkitCase().addArtifactType( "AD1_EXTRACTOR", "AD1 Extraction")
-        #artAD1 = qnx6Img.newArtifact(artIdAD1)
-        #attributes = ArrayList()
-        #attributes.add(BlackboardAttribute(BlackboardAttribute.ATTRIBUTE_TYPE.TSK_NAME, QNX6ReaderIngestModuleFactory.moduleName, "dddddzezz"))
-        #attributes.add(BlackboardAttribute(BlackboardAttribute.ATTRIBUTE_TYPE.TSK_TEMP_DIR, QNX6ReaderIngestModuleFactory.moduleName, "ddd//dd"))    
-        #artAD1.addAttributes(attributes)
-
-
-        #blackboard.postArtifact(artAD1)
-
+        #Construciton de l'objet QNX6 permettant de recuperer les infos du superblock ect ...
         qnx6fs = QNX6_FS(qnx6Img)
+
         #On recupere les information du premier super block
         SP = qnx6fs.getFirstSuperBlock()
 
@@ -144,35 +108,27 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
             self.postMessage("QNX6 file system detected")
 
             #Creation d un rapport contenant les informations du super blocks
-            self.createAndPostSBReport("QNX6SuperBlockReport.txt",wDirPath+"\\..\\Reports",SP)
+            self.createAndPostSBReport(dataSource.getName(),wDirPath+"\\..\\Reports",SP)
             self.postMessage("File System report created")
           
-            #Identification du SuperBlock actif
+            #Identification du SuperBlock actif (Le super block ayant l ID le plus grand est le super block actif)
             sndSPBlockOffset = qnx6fs.getSndSPBlockOffset()
             sndSPBlock = qnx6fs.readSPBlock(sndSPBlockOffset)
             if(qnx6fs.isQNX6FS(sndSPBlock)):
                 if(sndSPBlock['serial'] > SP['serial']):
-                    SP = sndSPBlock
-
-
-            #self.parseBitmap(SB)
-            #self.LongNames = self.parseLongFileNames(SB)
+                    SP = sndSPBlock      
 
             #Recuperation des inodes a partir des rootNodes
             inodeTree = qnx6fs.readBlockPointers(SP["RootNode"]['ptr'],SP["tailleBlock"],SP["SP_end"],SP['RootNode']['level'])
 
-            #Recupere dans dirTree la liste des fichiers et repertoires
-            dirTree,inodeTree = qnx6fs.parseINodeDIRStruct(inodeTree,SP['tailleBlock'],SP['SP_end'])
+            #On recupere les inodes correspondant a des fichier dont le nom est long (traite differement)
+            longNameObj = qnx6fs.parseLongFileNames(SP)
+
+            #Recupere dans dirTree un dictionaire contenant l id des dossiers et fichiers leurs noms et leurs parents
+            dirTree,inodeTree = qnx6fs.parseINodeDIRStruct(inodeTree,longNameObj,SP['tailleBlock'],SP['SP_end'])
             self.log(Level.INFO, str(dirTree ))
 
-            #Repertoire dans lequel extraire les donnees
-            realRootDir = wDirPath+"\\"+dataSource.getName()+"\\Partition0"
-            if(os.path.exists(realRootDir) == False):
-                try: 
-                    os.makedirs(realRootDir)
-                except OSError as e:
-                    pass 
-
+            #On recupere la liste des fichiers et repertoires avec toutes les information associees
             dirList,fileList = qnx6fs.getDirsAndFiles(inodeTree,dirTree,SP['tailleBlock'],SP['SP_end'])
 
             for rep in dirList:
@@ -197,12 +153,14 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
                         self.log(Level.INFO, os.strerror(e.errno))
                         pass
 
-            
             self.postMessage("Files extracted in "+ realRootDir)
 
-            #Creation de l arboresence dans Autopsy
+            #Creation de l arboresence dans Autopsy a partir de la datasource
             virtualRootDir = Case.getCurrentCase().getSleuthkitCase().addLocalDirectory(dataSource.getId(),"Partition"+str(0))
             self.addTree(realRootDir,virtualRootDir)
+
+            #Creation du rapport contenant toutes les informations extraites
+            self.createAndPostContentReport(dataSource.getName(), wDirPath+"\\..\\Reports",dirList, fileList)
         else:
             self.postMessage("No QNX6 file system detected")
 
@@ -241,13 +199,33 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
     def postMessage(self,message):
         IngestServices.getInstance().postMessage(IngestMessage.createMessage(IngestMessage.MessageType.DATA,QNX6ReaderIngestModuleFactory.moduleName, message))
 
-    #Creer un rapport contenant les informations du super block
-    def createAndPostSBReport(self,filename,path,SP):
+    def createAndPostContentReport(self,name,path,dirList,fileList):
+        filename = name + "ContentReport.txt"
         if(not path):
             os.makedirs(path)
         filePath = os.path.join(path, filename)
         report = open(filePath, 'wb+')
-        report.write("--QNX6FS Super Block infos--\n\n")
+        report.write("------"+name+" QNX6FS Content Report------\n")
+
+        report.write("\n\n------Directories Extracted------\n")
+        for rep in dirList:
+            report.write("Path : "+rep['path']+ "  |  Name : "+rep['name']+"  |  Size : "+str(rep['size'])+"  |  UID : "+str(rep['uid'])+"  |  GID : "+str(rep['gid'])+"  |  ftime : "+str(rep['ftime'])+"  |  atime : "+str(rep['atime'])+"  |  ctime : "+str(rep['ctime'])+"  |  mtime : "+str(rep['mtime'])+"  |  status : "+str(rep['status'])+"\n")
+
+        report.write("\n\n------Files Extracted------\n")
+        for file in fileList:
+            report.write("Path : "+file['path']+ "  |  Name : "+file['name']+"  |  Size : "+str(file['size'])+"  |  UID : "+str(file['uid'])+"  |  GID : "+str(file['gid'])+"  |  ftime : "+str(file['ftime'])+"  |  atime : "+str(file['atime'])+"  |  ctime : "+str(file['ctime'])+"  |  mtime : "+str(file['mtime'])+"  |  status : "+str(file['status'])+"\n")
+        report.close()
+        # Add the report to the Case, so it is shown in the tree
+        Case.getCurrentCase().addReport(filePath, QNX6ReaderIngestModuleFactory.moduleName , name + " Content report")
+
+    #Creer un rapport contenant les informations du super block
+    def createAndPostSBReport(self,name,path,SP):
+        filename = name + "SuperBlockReport.txt"
+        if(not path):
+            os.makedirs(path)
+        filePath = os.path.join(path, filename)
+        report = open(filePath, 'wb+')
+        report.write("------"+name+" QNX6FS Super Block informations------\n\n")
         report.write("Serial number : "+ hex(int(SP["serialNum"]))+"\n")
         report.write("Magic number : "+ hex(int(SP["magic"]))+"\n")
         report.write("File system creation time :  "+ datetime.fromtimestamp(int(SP['ctime'])).strftime("%m/%d/%Y, %H:%M:%S") + "\n")
@@ -262,4 +240,4 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
         report.close()
 
         # Add the report to the Case, so it is shown in the tree
-        Case.getCurrentCase().addReport(filePath, QNX6ReaderIngestModuleFactory.moduleName , "QNX6 Super Block Report")
+        Case.getCurrentCase().addReport(filePath, QNX6ReaderIngestModuleFactory.moduleName , name + " Super Block Report")

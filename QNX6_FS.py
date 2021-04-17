@@ -38,30 +38,11 @@ class QNX6_FS:
     QNX6_MAGIC_ID       = 0x68191122
     QNX6_PTR_MAX_LEVELS = 5
     QNX6_SHORT_NAME_MAX = 27
+    QNX6_LONG_NAME_MAX = 510
 
     def __init__(self, abstractFile):
         self.devQNX6 = abstractFile
         self.spBlock = self.readSPBlock()
-        
-
-    def ParseQNX(self, Partition=0, PartitionID=0):
-
-        ## If the blocksize != 512, then super block is longer, re-read the area.
-        #if (SuperBlock['blocksize'] != 512):
-        #    self.fileIO.seek( ( Partition['StartingOffset'] + self.QNX6_BOOTBLOCK_SIZE ) , 0 )
-        #    Data = self.fileIO.read( SuperBlock['blocksize'] )
-        #    SuperBlock = self.parseQNX6SuperBlock(Data, Partition['StartingOffset'])
-
-       
-
-            #self.parseBitmap(SB)
-            #self.LongNames = self.parseLongFileNames(SB)
-
-
-            return 0
-
-    def checkQNX6ptr(self,ptr):
-        return not ((ptr+1) & ptr == 0 and ptr != 0)
 
     def readBlockPointers(self,listIndBlocks, tailleBlock, offset, level):
         inodeTree = {}
@@ -80,13 +61,13 @@ class QNX6_FS:
             self.devQNX6.read(buff,ptr,tailleBlock)
             for i in range(0,nbInode):
                 try:
-                    inodeTree[len(inodeTree)+1] = self.readQNX6Lvl0Inode(buff[i*128:(i+1)*128])
+                    inodeTree[len(inodeTree)+1] = self.parseInodeEntry(buff[i*128:(i+1)*128])
                 except:
                     inodeTree[len(inodeTree)+1] = None
                     break
         return inodeTree
 
-    def parseINodeDIRStruct(self,inodeTree,blocksize,offset):
+    def parseINodeDIRStruct(self,inodeTree,longNameTree,blocksize,offset):
         dirTree = {}
         buff = jarray.zeros( 32, "b")
         inodeEntryList = []
@@ -106,7 +87,7 @@ class QNX6_FS:
                             if(unpack('<B', buff[4:5])[0]<=self.QNX6_SHORT_NAME_MAX):
                                 objects[str(ptr)+"-"+str(i)]['Name'] = "".join("%c" % i for i in unpack('<27B', buff[5:32] ) ).replace("\x00","")
                             else:   
-                                objects[str(ptr)+"-"+str(i)]['Name'] =  self.LongNames[unpack('>I', buff[5:9])[0]+1] #self.LongNames[unpack('<I', raw[12:16])[0]] 
+                                objects[str(ptr)+"-"+str(i)]['Name'] =  longNameTree[unpack('>I', buff[5:9])[0]+1] #self.LongNames[unpack('<I', raw[12:16])[0]] 
                 for i in objects:
                     if(objects[i]['Name'] == "."):
                         rootID=objects[i]['PTR']
@@ -115,7 +96,6 @@ class QNX6_FS:
                     obj = objects[i]
                     if((obj['Name'] != "..") and (obj['Name'] != ".") and (obj['Name'] != "")):
                         dirTree[ obj['PTR'] ] = {'Name':obj['Name'],'ROOT_INODE':rootID}
-                        ##Recursively Process all Dirs
                         if obj['PTR'] > 1:
                             inodeEntryList.append(inodeTree[obj['PTR']])
         return dirTree,inodeTree
@@ -126,13 +106,13 @@ class QNX6_FS:
         for keyObj in dirTree:
             if(keyObj != 0l):
                 if(inodeTree[keyObj] != None and self.InodeEntry_ISDIR(inodeTree[keyObj]['mode']) ):
-                    dirList.append(self.genDirs(inodeTree,dirTree,keyObj))
+                    dirList.append(self.getDirFromInodeId(inodeTree,dirTree,keyObj))
                     continue
                 if(inodeTree[keyObj] != None and not self.InodeEntry_ISDIR(inodeTree[keyObj]['mode']) ):
-                    fileList.append(self.dumpfile(inodeTree,dirTree,keyObj,blksize,blkOffset))
+                    fileList.append(self.getFileFromInodeId(inodeTree,dirTree,keyObj,blksize,blkOffset))
         return dirList,fileList
 
-    def genDirs(self, inodeTree,dirTree,DataINodeID):
+    def getDirFromInodeId(self, inodeTree,dirTree,DataINodeID):
         InodeDataEntry = inodeTree[DataINodeID]
         if(InodeDataEntry != None and self.InodeEntry_ISDIR(InodeDataEntry['mode']) ):
             ## Create DIR List
@@ -147,7 +127,7 @@ class QNX6_FS:
             return {'path':dirpath,'name': dirTree[DataINodeID]['Name']  ,'size':InodeDataEntry['size'],'uid':InodeDataEntry['uid'],'gid':InodeDataEntry['gid'],'ftime':InodeDataEntry['ftime'],'atime':InodeDataEntry['atime'],'ctime':InodeDataEntry['ctime'],'mtime':InodeDataEntry['mtime'],'status':InodeDataEntry['status']} 
         return None
 
-    def dumpfile(self, inodeTree,dirTree,DataINodeID,blksize=1024,blkOffset=0):
+    def getFileFromInodeId(self, inodeTree,dirTree,DataINodeID,blksize=1024,blkOffset=0):
         InodeDataEntry = inodeTree[DataINodeID]
         if(InodeDataEntry != None and not self.InodeEntry_ISDIR(InodeDataEntry['mode']) ):
             filename = dirTree[DataINodeID]['Name']
@@ -204,8 +184,50 @@ class QNX6_FS:
         if level == 0:
             return DATABUFF
 
+    def parseLongFileNames(self,superBlock):
+        longnames = []
+        for n in range(0, 16):
+            ptr = superBlock['Longfile']['ptr'][n]
+            if(self.checkQNX6ptr(ptr)):
+                ptrB = (ptr*superBlock['blocksize'])+superBlock['blks_offset'];
+                longnames.append(self.parseQNX6LongFilename(ptr,superBlock['Longfile']['level'],superBlock['blocksize'],superBlock['blks_offset']))
+                
+        ##Make Dictionary with all Names and INode/PTRs
+        count = 1
+        Dict = {}
+        for i in longnames:
+            if(i != None):
+                for q in i:
+                    if(q != None):
+                        Dict[count] = i[q]
+                        count = count + 1;
+        return Dict
 
-    def readSPBlock(self, offset=0x2000):
+    def parseQNX6LongFilename(self,ptr_,level,blksize,blksOffset):
+        handle = jarray.zeros( 512, "b")
+        self.devQNX6.read(handle,(ptr_*blksize)+blksOffset,512)
+        LogFilenameNode={}
+        if level == 0:
+            size = unpack('<H',handle[0:2])
+            fname = unpack('<'+str(size[0])+'B',handle[2:size[0]+2])
+            if(size[0] > 0):
+                LogFilenameNode[str(ptr_)] = str("".join("%c" % i for i in fname )).strip()
+                return LogFilenameNode
+            else:
+                return None
+        else:
+            Pointers = unpack('<128I', handle)
+            for i in range(0, 128):
+                if (self.checkQNX6ptr(Pointers[i]) != False):
+                    name = (self.parseQNX6LongFilename(Pointers[i],level-1,blksize,blksOffset))
+                    if name != None:
+                        if level >= 1:
+                            LogFilenameNode[str(Pointers[i])]=name[str(Pointers[i])]
+                        else:
+                            LogFilenameNode[str(Pointers[i])]=name
+        return LogFilenameNode
+
+    def readSPBlock(self, offset = 0x2000):
         buffer = jarray.zeros( self.QNX6_SPBLOCK_SIZE, "b")
         self.devQNX6.read(buffer,offset,self.QNX6_SPBLOCK_SIZE)
         spBlock = {}
@@ -229,7 +251,7 @@ class QNX6_FS:
         spBlock['RootNode'] = self.parseQNX6RootNode(buffer[72:152])
         spBlock['Bitmap'] = self.parseQNX6RootNode(buffer[152:232])
         spBlock['Longfile'] = self.parseQNX6RootNode(buffer[232:312])
-        #self.spBlock['Unknown'] = self.parseQNX6RootNode(sb[312:392])
+
         return spBlock
 
     def parseQNX6RootNode(self,rn):
@@ -241,7 +263,7 @@ class QNX6_FS:
         RN['reserved'] = unpack('<6B', rn[74:80])[0]
         return RN 
 
-    def readQNX6Lvl0Inode(self,ie): #qnx6_inode_entry 128bytes
+    def parseInodeEntry(self,ie): #qnx6_inode_entry 128bytes
         IE = {}
         IE['size'] = unpack('<Q',ie[0:8])[0]
         IE['uid'] = unpack('<I',ie[8:12])[0]
@@ -274,4 +296,6 @@ class QNX6_FS:
         return  self.spBlock
     def getSndSPBlockOffset(self):
         return self.QNX6_SPBLOCK_ZONE + self.QNX6_BOOTBLOCK_ZONE + ( self.spBlock['numBlocks'] * self.spBlock['tailleBlock'])
+    def checkQNX6ptr(self,ptr):
+        return not ((ptr+1) & ptr == 0 and ptr != 0)
 
