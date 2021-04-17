@@ -119,8 +119,20 @@ class QNX6_FS:
                         if obj['PTR'] > 1:
                             inodeEntryList.append(inodeTree[obj['PTR']])
         return dirTree,inodeTree
-   
-    def genDirs(self,outputDir, inodeTree,dirTree,DataINodeID):
+    
+    def getDirsAndFiles(self,inodeTree,dirTree,blksize=1024,blkOffset=0):
+        dirList = []
+        fileList = []
+        for keyObj in dirTree:
+            if(keyObj != 0l):
+                if(inodeTree[keyObj] != None and self.InodeEntry_ISDIR(inodeTree[keyObj]['mode']) ):
+                    dirList.append(self.genDirs(inodeTree,dirTree,keyObj))
+                    continue
+                if(inodeTree[keyObj] != None and not self.InodeEntry_ISDIR(inodeTree[keyObj]['mode']) ):
+                    fileList.append(self.dumpfile(inodeTree,dirTree,keyObj,blksize,blkOffset))
+        return dirList,fileList
+
+    def genDirs(self, inodeTree,dirTree,DataINodeID):
         InodeDataEntry = inodeTree[DataINodeID]
         if(InodeDataEntry != None and self.InodeEntry_ISDIR(InodeDataEntry['mode']) ):
             ## Create DIR List
@@ -135,7 +147,7 @@ class QNX6_FS:
             return {'path':dirpath,'name': dirTree[DataINodeID]['Name']  ,'size':InodeDataEntry['size'],'uid':InodeDataEntry['uid'],'gid':InodeDataEntry['gid'],'ftime':InodeDataEntry['ftime'],'atime':InodeDataEntry['atime'],'ctime':InodeDataEntry['ctime'],'mtime':InodeDataEntry['mtime'],'status':InodeDataEntry['status']} 
         return None
 
-    def dumpfile(self,outputDir, inodeTree,dirTree,DataINodeID,blksize=1024,blkOffset=0,PartitionID=0):
+    def dumpfile(self, inodeTree,dirTree,DataINodeID,blksize=1024,blkOffset=0):
         InodeDataEntry = inodeTree[DataINodeID]
         if(InodeDataEntry != None and not self.InodeEntry_ISDIR(InodeDataEntry['mode']) ):
             filename = dirTree[DataINodeID]['Name']
@@ -157,34 +169,26 @@ class QNX6_FS:
                     ## Calculate Physical Location.
                     PhysicalPTRs += [(pointer_index*blksize)+blkOffset]
 
-            if(os.path.exists(outputDir+"//"+dirpath) == False):
-                try: 
-                    os.makedirs(outputDir+"//"+dirpath)
-                except OSError as e:
-                    pass
+            filepath="//"+dirpath+filename
 
-            filepath=outputDir+"//"+dirpath+filename
-            if(os.path.exists(filepath) == False):
-                self.batchProcessPTRS(PhysicalPTRs,InodeDataEntry,InodeDataEntry['filelevels'],blksize,blkOffset,filepath)
+            data = self.batchProcessPTRS(PhysicalPTRs,InodeDataEntry,InodeDataEntry['filelevels'],blksize,blkOffset,filepath)
+            return {'path':dirpath,'name': dirTree[DataINodeID]['Name']  ,'size':InodeDataEntry['size'],'uid':InodeDataEntry['uid'],'gid':InodeDataEntry['gid'],'ftime':InodeDataEntry['ftime'],'atime':InodeDataEntry['atime'],'ctime':InodeDataEntry['ctime'],'mtime':InodeDataEntry['mtime'],'status':InodeDataEntry['status'],'data': data}
+        return None
 
-            os.utime(filepath, (InodeDataEntry['atime'], InodeDataEntry['mtime']))
 
     def batchProcessPTRS(self,ptrs,InodeDataEntry,level,blksize,blkOffset,path,io=0):
-        if io == 0:
-            io = open(path,"wb+");
-
         DATABUFF = ""
         for i in range(0,len(ptrs)):
             if level == 0:
                 if self.checkQNX6ptr(ptrs[i]):
                     if ptrs[i] != 0xffffffff and ptrs[i] != 0x0: 
-                        if (InodeDataEntry['size'] - io.tell()) >= 1024:
+                        if (InodeDataEntry['size']) >= 1024:
                             buf = jarray.zeros( blksize, "b")
                             self.devQNX6.read(buf,ptrs[i],blksize)
                             DATABUFF += buf
                         else:
-                            buf = jarray.zeros( (InodeDataEntry['size'] - io.tell()), "b")
-                            self.devQNX6.read(buf,ptrs[i],(InodeDataEntry['size'] - io.tell()))
+                            buf = jarray.zeros( (InodeDataEntry['size'] ), "b")
+                            self.devQNX6.read(buf,ptrs[i],(InodeDataEntry['size']))
                             DATABUFF += buf
             else:       
                 buf = jarray.zeros(blksize, "b")
@@ -195,11 +199,10 @@ class QNX6_FS:
                     if self.checkQNX6ptr(newPTRS[i]):
                         if newPTRS[i] != 0xffffffff and newPTRS[i] != 0x0:
                             level2_PTRS += [(newPTRS[i]*blksize)+blkOffset]
-                self.batchProcessPTRS(level2_PTRS,InodeDataEntry,level-1,blksize,blkOffset,path,io)
+                return self.batchProcessPTRS(level2_PTRS,InodeDataEntry,level-1,blksize,blkOffset,path,io)
 
         if level == 0:
-            io.write(DATABUFF)
-            io.close()
+            return DATABUFF
 
 
     def readSPBlock(self, offset=0x2000):

@@ -173,25 +173,31 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
                 except OSError as e:
                     pass 
 
+            dirList,fileList = qnx6fs.getDirsAndFiles(inodeTree,dirTree,SP['tailleBlock'],SP['SP_end'])
 
-            directoryTree = []
-            for i in dirTree:
-                if(i != 0l): #->Fichier supprime
-                    rep = qnx6fs.genDirs(realRootDir,inodeTree,dirTree,i)
-                    if(rep != None):
-                        path = os.path.join(realRootDir+"\\"+rep["path"],rep["name"])
-                        if(not os.path.exists(path)):
-                            try: 
-                                os.makedirs(path)
-                            except OSError as e:
-                                pass 
-                        directoryTree.append(rep)
-                        
-            self.log(Level.INFO, str(directoryTree ))
+            for rep in dirList:
+                dirPath = realRootDir+"\\"+os.path.join(rep["path"],rep["name"])
+                if(not os.path.exists(dirPath)):
+                    try:
+                        os.makedirs(dirPath)
+                    except OSError as e:
+                        self.postMessage("Erreur lors de la creation de : "+ dirPath )
+                        self.log(Level.INFO, os.strerror(e.errno))
+                        pass
 
-            #for i in dirTree:
-            #    if(i != 0l): #->Fichier supprime
-            #        qnx6fs.dumpfile(realRootDir,inodeTree,dirTree,i, SP['tailleBlock'],SP['SP_end'],0)
+            for file in fileList:
+                filePath = realRootDir+"\\"+os.path.join(file["path"],file["name"])
+                if(not os.path.exists(filePath)):
+                    try:
+                        f = open(filePath,"wb+")
+                        f.write(file["data"])
+                        f.close()
+                    except IOError as e:
+                        self.postMessage("Erreur lors de la creation de : "+ filePath )
+                        self.log(Level.INFO, os.strerror(e.errno))
+                        pass
+
+            
             self.postMessage("Files extracted in "+ realRootDir)
 
             #Creation de l arboresence dans Autopsy
