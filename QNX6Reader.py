@@ -126,6 +126,7 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
 
             #Recupere dans dirTree un dictionaire contenant l id des dossiers et fichiers leurs noms et leurs parents
             dirTree,inodeTree = qnx6fs.parseINodeDIRStruct(inodeTree,longNameObj,SP['tailleBlock'],SP['SP_end'])
+            #self.log(Level.INFO, str(inodeTree ))
             self.log(Level.INFO, str(dirTree ))
 
             #On recupere la liste des fichiers et repertoires avec toutes les information associees

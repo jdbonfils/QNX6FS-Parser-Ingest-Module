@@ -189,8 +189,8 @@ class QNX6_FS:
         for n in range(0, 16):
             ptr = superBlock['Longfile']['ptr'][n]
             if(self.checkQNX6ptr(ptr)):
-                ptrB = (ptr*superBlock['blocksize'])+superBlock['blks_offset'];
-                longnames.append(self.parseQNX6LongFilename(ptr,superBlock['Longfile']['level'],superBlock['blocksize'],superBlock['blks_offset']))
+                ptrB = (ptr*superBlock['tailleBlock'])+superBlock['SP_end'];
+                longnames.append(self.parseQNX6LongFilename(ptr,superBlock['Longfile']['level'],superBlock['tailleBlock'],superBlock['SP_end']))
                 
         ##Make Dictionary with all Names and INode/PTRs
         count = 1
