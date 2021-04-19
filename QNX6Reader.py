@@ -100,8 +100,10 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
         #Construciton de l'objet QNX6 permettant de recuperer les infos du superblock ect ...
         qnx6fs = QNX6_FS(qnx6Img)
 
+        #Il faudrait prendre en compte la place occupe par la partition si il y en a
+        FSoffset = 0
         #On recupere les information du premier super block
-        SP = qnx6fs.getFirstSuperBlock()
+        SP = qnx6fs.readSPBlock(FSoffset)
 
         #Si il s agit bien d un FS QNX6
         if(qnx6fs.isQNX6FS(SP)):
@@ -112,7 +114,7 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
             self.postMessage("File System report created")
           
             #Identification du SuperBlock actif (Le super block ayant l ID le plus grand est le super block actif)
-            sndSPBlockOffset = qnx6fs.getSndSPBlockOffset()
+            sndSPBlockOffset = qnx6fs.getSndSPBlockOffset(SP)
             sndSPBlock = qnx6fs.readSPBlock(sndSPBlockOffset)
             if(qnx6fs.isQNX6FS(sndSPBlock)):
                 if(sndSPBlock['serial'] > SP['serial']):

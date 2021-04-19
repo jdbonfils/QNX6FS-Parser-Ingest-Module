@@ -33,6 +33,7 @@ from org.sleuthkit.autopsy.casemodule.services import Blackboard
 class QNX6_FS:
 
     QNX6_BOOTBLOCK_ZONE = 0
+    QNX6_BOOTBLOCK_SIZE = 0x2000
     QNX6_SPBLOCK_SIZE   = 0x200 
     QNX6_SPBLOCK_ZONE   = 0x1000
     QNX6_MAGIC_ID       = 0x68191122
@@ -42,7 +43,7 @@ class QNX6_FS:
 
     def __init__(self, abstractFile):
         self.devQNX6 = abstractFile
-        self.spBlock = self.readSPBlock()
+        #self.spBlock = self.readSPBlock()
 
     def readBlockPointers(self,listIndBlocks, tailleBlock, offset, level):
         inodeTree = {}
@@ -227,9 +228,9 @@ class QNX6_FS:
                             LogFilenameNode[str(Pointers[i])]=name
         return LogFilenameNode
 
-    def readSPBlock(self, offset = 0x2000):
+    def readSPBlock(self, offset = 0):
         buffer = jarray.zeros( self.QNX6_SPBLOCK_SIZE, "b")
-        self.devQNX6.read(buffer,offset,self.QNX6_SPBLOCK_SIZE)
+        self.devQNX6.read(buffer,offset+self.QNX6_BOOTBLOCK_SIZE,self.QNX6_SPBLOCK_SIZE)
         spBlock = {}
         spBlock["magic"] = unpack('<I', buffer[:4])[0]
         spBlock['checksum'] = (unpack('>I', buffer[4:8])[0])
@@ -247,7 +248,7 @@ class QNX6_FS:
         spBlock['numBlocks'] = unpack('<I', buffer[60:64])[0]
         spBlock['blocksLibres'] = unpack('<I', buffer[64:68])[0]
         spBlock['allocgroup'] = unpack('<I', buffer[68:72])[0]
-        spBlock['SP_end'] = offset + self.QNX6_SPBLOCK_ZONE;
+        spBlock['SP_end'] = offset + self.QNX6_BOOTBLOCK_SIZE + self.QNX6_SPBLOCK_ZONE;
         spBlock['RootNode'] = self.parseQNX6RootNode(buffer[72:152])
         spBlock['Bitmap'] = self.parseQNX6RootNode(buffer[152:232])
         spBlock['Longfile'] = self.parseQNX6RootNode(buffer[232:312])
@@ -292,10 +293,10 @@ class QNX6_FS:
         return ((mode & 0100000) == 0100000)
     def InodeEntry_ISLNK(self,mode):
         return ((mode & 0120000) == 0120000)
-    def getFirstSuperBlock(self):
-        return  self.spBlock
-    def getSndSPBlockOffset(self):
-        return self.QNX6_SPBLOCK_ZONE + self.QNX6_BOOTBLOCK_ZONE + ( self.spBlock['numBlocks'] * self.spBlock['tailleBlock'])
+    #def getFirstSuperBlock(self):
+    #    return  self.spBlock
+    def getSndSPBlockOffset(self, SB):
+        return SB['SP_end'] + ( SB['numBlocks'] * SB['tailleBlock'])
     def checkQNX6ptr(self,ptr):
         return not ((ptr+1) & ptr == 0 and ptr != 0)
 
