@@ -87,8 +87,15 @@ class QNX6_FS:
                             objects[str(ptr)+"-"+str(i)]['PTR'] = unpack('<I', buff[0:4])[0]
                             if(unpack('<B', buff[4:5])[0]<=self.QNX6_SHORT_NAME_MAX):
                                 objects[str(ptr)+"-"+str(i)]['Name'] = "".join("%c" % i for i in unpack('<27B', buff[5:32] ) ).replace("\x00","")
-                            else:   
-                                objects[str(ptr)+"-"+str(i)]['Name'] =  longNameTree[unpack('>I', buff[5:9])[0]+1] #self.LongNames[unpack('<I', raw[12:16])[0]] 
+                            else:
+                                longnameKey = unpack('>I', buff[5:9])[0]+1
+                                if(longnameKey in longNameTree):
+                                    objects[str(ptr)+"-"+str(i)]['Name'] =  longNameTree[unpack('>I', buff[5:9])[0]+1] #self.LongNames[unpack('<I', raw[12:16])[0]] 
+                                #elif(unpack('<I', buff[12:16])[0] in longNameTree):
+                                #    objects[str(ptr)+"-"+str(i)]['Name'] =  longNameTree[unpack('<I', buff[12:16])[0] ] #self.LongNames[unpack('<I', raw[12:16])[0]]
+                                else: #Si un fichier avec un nom long a ete supprime alors  on le nomme noname
+                                    objects[str(ptr)+"-"+str(i)]['Name'] = "noname"
+
                 for i in objects:
                     if(objects[i]['Name'] == "."):
                         rootID=objects[i]['PTR']
@@ -97,7 +104,7 @@ class QNX6_FS:
                     obj = objects[i]
                     if((obj['Name'] != "..") and (obj['Name'] != ".") and (obj['Name'] != "")):
                         dirTree[ obj['PTR'] ] = {'Name':obj['Name'],'ROOT_INODE':rootID}
-                        if obj['PTR'] > 1:
+                        if obj['PTR'] >= 1:
                             inodeEntryList.append(inodeTree[obj['PTR']])
         return dirTree,inodeTree
     
@@ -111,7 +118,37 @@ class QNX6_FS:
                     continue
                 if(inodeTree[keyObj] != None and not self.InodeEntry_ISDIR(inodeTree[keyObj]['mode']) ):
                     fileList.append(self.getFileFromInodeId(inodeTree,dirTree,keyObj,blksize,blkOffset))
+            else:
+                filename = "deleted_"+dirTree[keyObj]['Name']
+                ## Create DIR List
+                dirpath = ""
+                dirID = keyObj
+                while True:
+                    if(dirID == 0x01):
+                        break
+                    if(dirID != keyObj):
+                        dirpath = dirTree[dirID]['Name'] +"//"+ dirpath
+                    dirID = dirTree[dirID]['ROOT_INODE']
+                fileList.append({'path':dirpath,'name': filename  ,'size':"0",'uid':"0",'gid':"0",'ftime':"0",'atime':"0",'ctime':"0",'mtime': "0",'status':"0",'data': None})
         return dirList,fileList
+
+    def getDeletedFiles(self,delFilesDirName,inodeTree,blksize=1024,blkOffset=0):
+        deletedFiles = []
+        for IEidx in inodeTree:
+            IE = inodeTree[IEidx]
+            if(IE != None and IE["status"] == 2):
+                if(not self.InodeEntry_ISDIR(IE['mode']) ):
+                     ## Create List of all physical blocks
+                    PhysicalPTRs = []
+                    for pointer_index in IE['block_ptr']:
+                        ## Make sure pointer != 0xFFFFFFFF
+                        if pointer_index != 0xffffffff:
+                            ## Calculate Physical Location.
+                            PhysicalPTRs += [(pointer_index*blksize)+blkOffset]
+
+                    data = self.batchProcessPTRS(PhysicalPTRs,IE,IE['filelevels'],blksize,blkOffset)
+                    deletedFiles.append({'path':delFilesDirName,'name': str("deleted_")+str(IEidx)  ,'size':IE['size'],'uid':IE['uid'],'gid':IE['gid'],'ftime':IE['ftime'],'atime':IE['atime'],'ctime':IE['ctime'],'mtime':IE['mtime'],'status':IE['status'],'data': data})
+        return deletedFiles
 
     def getDirFromInodeId(self, inodeTree,dirTree,DataINodeID):
         InodeDataEntry = inodeTree[DataINodeID]
@@ -141,6 +178,8 @@ class QNX6_FS:
                 if(dirID != DataINodeID):
                     dirpath = dirTree[dirID]['Name'] +"//"+ dirpath
                 dirID = dirTree[dirID]['ROOT_INODE']
+                if(dirID not in dirTree):
+                    dirID != 0x01
 
             ## Create List of all physical blocks
             PhysicalPTRs = []
@@ -150,14 +189,12 @@ class QNX6_FS:
                     ## Calculate Physical Location.
                     PhysicalPTRs += [(pointer_index*blksize)+blkOffset]
 
-            filepath="//"+dirpath+filename
-
-            data = self.batchProcessPTRS(PhysicalPTRs,InodeDataEntry,InodeDataEntry['filelevels'],blksize,blkOffset,filepath)
+            data = self.batchProcessPTRS(PhysicalPTRs,InodeDataEntry,InodeDataEntry['filelevels'],blksize,blkOffset)
             return {'path':dirpath,'name': dirTree[DataINodeID]['Name']  ,'size':InodeDataEntry['size'],'uid':InodeDataEntry['uid'],'gid':InodeDataEntry['gid'],'ftime':InodeDataEntry['ftime'],'atime':InodeDataEntry['atime'],'ctime':InodeDataEntry['ctime'],'mtime':InodeDataEntry['mtime'],'status':InodeDataEntry['status'],'data': data}
         return None
 
 
-    def batchProcessPTRS(self,ptrs,InodeDataEntry,level,blksize,blkOffset,path,io=0):
+    def batchProcessPTRS(self,ptrs,InodeDataEntry,level,blksize,blkOffset):
         DATABUFF = ""
         for i in range(0,len(ptrs)):
             if level == 0:
@@ -180,7 +217,7 @@ class QNX6_FS:
                     if self.checkQNX6ptr(newPTRS[i]):
                         if newPTRS[i] != 0xffffffff and newPTRS[i] != 0x0:
                             level2_PTRS += [(newPTRS[i]*blksize)+blkOffset]
-                return self.batchProcessPTRS(level2_PTRS,InodeDataEntry,level-1,blksize,blkOffset,path,io)
+                return self.batchProcessPTRS(level2_PTRS,InodeDataEntry,level-1,blksize,blkOffset)
 
         if level == 0:
             return DATABUFF
@@ -230,7 +267,7 @@ class QNX6_FS:
 
     def readSPBlock(self, offset = 0):
         buffer = jarray.zeros( self.QNX6_SPBLOCK_SIZE, "b")
-        self.devQNX6.read(buffer,offset+self.QNX6_BOOTBLOCK_SIZE,self.QNX6_SPBLOCK_SIZE)
+        self.devQNX6.read(buffer,offset,self.QNX6_SPBLOCK_SIZE)
         spBlock = {}
         spBlock["magic"] = unpack('<I', buffer[:4])[0]
         spBlock['checksum'] = (unpack('>I', buffer[4:8])[0])
@@ -248,7 +285,7 @@ class QNX6_FS:
         spBlock['numBlocks'] = unpack('<I', buffer[60:64])[0]
         spBlock['blocksLibres'] = unpack('<I', buffer[64:68])[0]
         spBlock['allocgroup'] = unpack('<I', buffer[68:72])[0]
-        spBlock['SP_end'] = offset + self.QNX6_BOOTBLOCK_SIZE + self.QNX6_SPBLOCK_ZONE;
+        spBlock['SP_end'] = offset + self.QNX6_SPBLOCK_ZONE;
         spBlock['RootNode'] = self.parseQNX6RootNode(buffer[72:152])
         spBlock['Bitmap'] = self.parseQNX6RootNode(buffer[152:232])
         spBlock['Longfile'] = self.parseQNX6RootNode(buffer[232:312])
@@ -282,8 +319,8 @@ class QNX6_FS:
         IE['unknown2'] = unpack('<2B',ie[102:104])
         IE['zero2'] = unpack('<6I',ie[104:128]) 
         if(IE['size'] == 0):
-            return None 
-        return IE  
+                return None 
+        return IE
 
     def isQNX6FS(self,SP):
         return (SP["magic"] == self.QNX6_MAGIC_ID)

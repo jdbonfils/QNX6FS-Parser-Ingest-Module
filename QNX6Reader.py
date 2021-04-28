@@ -101,7 +101,7 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
         qnx6fs = QNX6_FS(qnx6Img)
 
         #Il faudrait prendre en compte la place occupe par la partition si il y en a
-        FSoffset = 0
+        FSoffset = 0 + qnx6fs.QNX6_BOOTBLOCK_SIZE
         #On recupere les information du premier super block
         SP = qnx6fs.readSPBlock(FSoffset)
 
@@ -117,12 +117,12 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
             sndSPBlockOffset = qnx6fs.getSndSPBlockOffset(SP)
             sndSPBlock = qnx6fs.readSPBlock(sndSPBlockOffset)
             if(qnx6fs.isQNX6FS(sndSPBlock)):
-                if(sndSPBlock['serial'] > SP['serial']):
-                    SP = sndSPBlock      
+                if(sndSPBlock['serialNum'] > SP['serialNum']):
+                    SP = sndSPBlock  
 
             #Recuperation des inodes a partir des rootNodes
             inodeTree = qnx6fs.readBlockPointers(SP["RootNode"]['ptr'],SP["tailleBlock"],SP["SP_end"],SP['RootNode']['level'])
-
+            #self.log(Level.INFO, str(inodeTree ))
             #On recupere les inodes correspondant a des fichier dont le nom est long (traite differement)
             longNameObj = qnx6fs.parseLongFileNames(SP)
 
@@ -134,6 +134,17 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
             #On recupere la liste des fichiers et repertoires avec toutes les information associees
             dirList,fileList = qnx6fs.getDirsAndFiles(inodeTree,dirTree,SP['tailleBlock'],SP['SP_end'])
 
+            dirPath = realRootDir+"\\deleted_content"
+            if(not os.path.exists(dirPath)):
+                try:
+                    os.makedirs(dirPath)
+                except OSError as e:
+                    self.log(Level.INFO,"Erreur creation du repertoire deleted")
+                       
+            deletedFiles = qnx6fs.getDeletedFiles("deleted_content",inodeTree,SP['tailleBlock'],SP['SP_end'])
+
+
+
             for rep in dirList:
                 dirPath = realRootDir+"\\"+os.path.join(rep["path"],rep["name"])
                 if(not os.path.exists(dirPath)):
@@ -144,12 +155,13 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
                         self.log(Level.INFO, os.strerror(e.errno))
                         pass
 
-            for file in fileList:
+            for file in fileList+deletedFiles:
                 filePath = realRootDir+"\\"+os.path.join(file["path"],file["name"])
                 if(not os.path.exists(filePath)):
                     try:
                         f = open(filePath,"wb+")
-                        f.write(file["data"])
+                        if(file["data"] != None):
+                            f.write(file["data"])
                         f.close()
                     except IOError as e:
                         self.postMessage("Erreur lors de la creation de : "+ filePath )
