@@ -30,7 +30,7 @@ from org.sleuthkit.autopsy.casemodule.services import FileManager
 from org.sleuthkit.autopsy.casemodule.services import Blackboard
 '''
 Liens utiles :
-Certaines fonctions sont inspirées des liens suivant : 
+Certaines fonctions sont inspirees des liens suivant : 
 
 http://www.qnx.com/developers/docs/6.5.0/index.jsp?topic=%2Fcom.qnx.doc.neutrino%2Fbookset.html
 https://nop.ninja/ (Matthew Evans)

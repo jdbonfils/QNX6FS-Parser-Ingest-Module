@@ -243,11 +243,11 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
 
         report.write("\n\n------Directories Extracted------\n")
         for rep in dirList:
-            report.write("Path : "+rep['path']+ "  |  Name : "+rep['name']+"  |  Size : "+str(rep['size'])+"  |  UID : "+str(rep['uid'])+"  |  GID : "+str(rep['gid'])+"  |  ftime : "+str(rep['ftime'])+"  |  atime : "+str(rep['atime'])+"  |  ctime : "+str(rep['ctime'])+"  |  mtime : "+str(rep['mtime'])+"  |  status : "+str(rep['status'])+"\n")
+            report.write("Path : "+rep['path']+ "  |  Name : "+rep['name']+"  |  Size : "+str(rep['size'])+"  |  UID : "+str(rep['uid'])+"  |  GID : "+str(rep['gid'])+"  |  ftime : "+datetime.fromtimestamp(int(rep['ftime'])).strftime("%m/%d/%Y, %H:%M:%S")+"  |  atime : "+datetime.fromtimestamp(int(rep['atime'])).strftime("%m/%d/%Y, %H:%M:%S")+"  |  ctime : "+datetime.fromtimestamp(int(rep['ctime'])).strftime("%m/%d/%Y, %H:%M:%S")+"  |  mtime : "+datetime.fromtimestamp(int(rep['mtime'])).strftime("%m/%d/%Y, %H:%M:%S")+"  |  status : "+str(rep['status'])+"\n")
 
         report.write("\n\n------Files Extracted------\n")
         for file in fileList:
-            report.write("Path : "+file['path']+ "  |  Name : "+file['name']+"  |  Size : "+str(file['size'])+"  |  UID : "+str(file['uid'])+"  |  GID : "+str(file['gid'])+"  |  ftime : "+str(file['ftime'])+"  |  atime : "+str(file['atime'])+"  |  ctime : "+str(file['ctime'])+"  |  mtime : "+str(file['mtime'])+"  |  status : "+str(file['status'])+"\n")
+            report.write("Path : "+file['path']+ "  |  Name : "+file['name']+"  |  Size : "+str(file['size'])+"  |  UID : "+str(file['uid'])+"  |  GID : "+str(rep['gid'])+"  |  ftime : "+datetime.fromtimestamp(int(file['ftime'])).strftime("%m/%d/%Y, %H:%M:%S")+"  |  atime : "+datetime.fromtimestamp(int(file['atime'])).strftime("%m/%d/%Y, %H:%M:%S")+"  |  ctime : "+datetime.fromtimestamp(int(file['ctime'])).strftime("%m/%d/%Y, %H:%M:%S")+"  |  mtime : "+datetime.fromtimestamp(int(file['mtime'])).strftime("%m/%d/%Y, %H:%M:%S")+"  |  status : "+str(file['status'])+"\n")
         report.close()
         # Add the report to the Case, so it is shown in the tree
         Case.getCurrentCase().addReport(filePath, QNX6ReaderIngestModuleFactory.moduleName , name + " Content report")
