@@ -80,7 +80,8 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
     def process(self, dataSource, progressBar):
 
         # we don't know how much work there is yet
-        progressBar.switchToIndeterminate()
+        progressBar.switchToDeterminate(100)
+        progressBar.progress("Parsing Super Block",10)
         case =  Case.getCurrentCase()
         sKCase = case.getSleuthkitCase()
         wDirPath = case.getModuleDirectory()
@@ -104,7 +105,8 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
         FSoffset = 0 + qnx6fs.QNX6_BOOTBLOCK_SIZE
         #On recupere les information du premier super block
         SP = qnx6fs.readSPBlock(FSoffset)
-
+        #La fin du super block 1 permet de calculer les addresses a partir des pointeurs
+        SBend = SP["SP_end"]
         #Si il s agit bien d un FS QNX6
         if(qnx6fs.isQNX6FS(SP)):
             self.postMessage("QNX6 file system detected")
@@ -114,37 +116,54 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
             self.postMessage("File System report created")
           
             #Identification du SuperBlock actif (Le super block ayant l ID le plus grand est le super block actif)
+            #L autre block est le backupSuperBlock qui peut etre utile pour retrouver les donnees effavees
             sndSPBlockOffset = qnx6fs.getSndSPBlockOffset(SP)
             sndSPBlock = qnx6fs.readSPBlock(sndSPBlockOffset)
+            backUpSB = sndSPBlock
             if(qnx6fs.isQNX6FS(sndSPBlock)):
                 if(sndSPBlock['serialNum'] > SP['serialNum']):
-                    SP = sndSPBlock  
+                    backUpSB = SP
+                    SP = sndSPBlock
 
-            #Recuperation des inodes a partir des rootNodes
-            inodeTree = qnx6fs.readBlockPointers(SP["RootNode"]['ptr'],SP["tailleBlock"],SP["SP_end"],SP['RootNode']['level'])
-            #self.log(Level.INFO, str(inodeTree ))
+
+            #Recuperation des inodes a partir des rootNodes du superBlock actif
+            progressBar.progress("Parsing inodes",20)
+            inodeTree = qnx6fs.readBlockPointers(SP["RootNode"]['ptr'],SP["tailleBlock"],SBend,SP['RootNode']['level'])
+
+            #Recuperation des inodes a partir des rootNodes du backup superBlock (utile pour retrouver les donnees effacees)
+            backUpInodeTree = qnx6fs.readBlockPointers(backUpSB["RootNode"]['ptr'],backUpSB["tailleBlock"],SBend,backUpSB['RootNode']['level'])
+
             #On recupere les inodes correspondant a des fichier dont le nom est long (traite differement)
             longNameObj = qnx6fs.parseLongFileNames(SP)
 
-            #Recupere dans dirTree un dictionaire contenant l id des dossiers et fichiers leurs noms et leurs parents
-            dirTree,inodeTree = qnx6fs.parseINodeDIRStruct(inodeTree,longNameObj,SP['tailleBlock'],SP['SP_end'])
-            #self.log(Level.INFO, str(inodeTree ))
+            
+            #Recupere dans dirTree un dictionaire contenant l id des dossiers et des fichiers ainsi que leurs noms et l id de leurs parents
+            progressBar.progress("Parsing directory structure",65)
+            dirTree = qnx6fs.parseINodeDIRStruct(inodeTree,backUpInodeTree,longNameObj,SP['tailleBlock'],SBend)
+
+            #Affichage des inode dans le fichier de log
+            self.log(Level.INFO, str(inodeTree ))
             self.log(Level.INFO, str(dirTree ))
 
-            #On recupere la liste des fichiers et repertoires avec toutes les information associees
-            dirList,fileList = qnx6fs.getDirsAndFiles(inodeTree,dirTree,SP['tailleBlock'],SP['SP_end'])
+           
+            #On recupere la liste des fichiers et repertoires avec toutes les informations associees
+            progressBar.progress("Files and dirs recovery from inodes",80)
+            dirList,fileList = qnx6fs.getDirsAndFiles(inodeTree,dirTree,SP['tailleBlock'],SBend)
 
-            dirPath = realRootDir+"\\deleted_content"
+            #On cree un dossier special ou l on met les fichiers supprimees dont on a pas pu retrouver le path et le nom
+            retrivedContentDirName = "retrieved_content//"
+            dirPath = realRootDir+"\\"+ retrivedContentDirName
             if(not os.path.exists(dirPath)):
                 try:
                     os.makedirs(dirPath)
                 except OSError as e:
-                    self.log(Level.INFO,"Erreur creation du repertoire deleted")
-                       
-            deletedFiles = qnx6fs.getDeletedFiles("deleted_content",inodeTree,SP['tailleBlock'],SP['SP_end'])
+                    self.postMessage("Erreur lors de la creation de : "+ dirPath )
 
-
-
+            #On recupere les fichiers supprimees dont on a pas pu retrouver le path et le nom
+            deletedContent = qnx6fs.getDeletedContent(retrivedContentDirName,inodeTree,dirTree,SP['tailleBlock'],SBend)
+            
+            #On cree les dossiers retrouves dans un repertoire du projet
+            progressBar.progress("Creation of recovered files and dirs",90)
             for rep in dirList:
                 dirPath = realRootDir+"\\"+os.path.join(rep["path"],rep["name"])
                 if(not os.path.exists(dirPath)):
@@ -154,8 +173,8 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
                         self.postMessage("Erreur lors de la creation de : "+ dirPath )
                         self.log(Level.INFO, os.strerror(e.errno))
                         pass
-
-            for file in fileList+deletedFiles:
+            #On cree les fichiers retrouves dans un repertoire du projet
+            for file in fileList+deletedContent:
                 filePath = realRootDir+"\\"+os.path.join(file["path"],file["name"])
                 if(not os.path.exists(filePath)):
                     try:
@@ -168,21 +187,21 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
                         self.log(Level.INFO, os.strerror(e.errno))
                         pass
 
+            progressBar.progress("Creation of reports",95)
             self.postMessage("Files extracted in "+ realRootDir)
 
-            #Creation de l arboresence dans Autopsy a partir de la datasource
+            #Creation de l arboresence dans Autopsy a partir de la datasource et des donnees retrouvees
             virtualRootDir = Case.getCurrentCase().getSleuthkitCase().addLocalDirectory(dataSource.getId(),"Partition"+str(0))
             self.addTree(realRootDir,virtualRootDir)
 
             #Creation du rapport contenant toutes les informations extraites
-            self.createAndPostContentReport(dataSource.getName(), wDirPath+"\\..\\Reports",dirList, fileList)
+            self.createAndPostContentReport(dataSource.getName(), wDirPath+"\\..\\Reports",dirList, fileList+deletedContent)
         else:
             self.postMessage("No QNX6 file system detected")
 
-        #On notifie Autopsy que des element ont ete ajoute a la data source
+        #On notifie Autopsy que des elements ont ete ajoute a la data source
         Case.getCurrentCase().notifyDataSourceAdded(dataSource,  UUID.randomUUID())
-        #IngestServices.getInstance().fireModuleContentEvent(ModuleContentEvent(dataSource))
-
+        progressBar.progress("Task completed",100)
         return IngestModule.ProcessResult.OK
 
     #Ajoute le contenu d un repertoire dans les datasource d autopsy
@@ -246,7 +265,6 @@ class QNX6ReaderIngestModule(DataSourceIngestModule):
         report.write("File system creation time :  "+ datetime.fromtimestamp(int(SP['ctime'])).strftime("%m/%d/%Y, %H:%M:%S") + "\n")
         report.write("File system modification time :  "+ datetime.fromtimestamp(int(SP['ctime'])).strftime("%m/%d/%Y, %H:%M:%S")+ "\n")
         report.write("File system access time :  "+ datetime.fromtimestamp(int(SP['ctime'])).strftime("%m/%d/%Y, %H:%M:%S")+ "\n")
-        #report.write("Volume ID : "+ SP["volumeid"]+"\n")
         report.write("Block Size : "+ str(int(SP["tailleBlock"]))+" bytes \n")
         report.write("Number of blocks : "+ hex(int(SP["numBlocks"]))+"\n")
         report.write("Number of free blocks : "+ hex(int(SP["blocksLibres"]))+"\n")
