@@ -24,7 +24,7 @@ More information to install python ingest modules: [Autopsy User Documentation: 
 Usage
 ======
 
-### [Ingest module presentation :](http://www.youtube.com/watch?feature=player_embedded&v=H9FppPDLrpY)
+### [Ingest module presentation : http://www.youtube.com/watch?feature=player_embedded&v=H9FppPDLrpY ](http://www.youtube.com/watch?feature=player_embedded&v=H9FppPDLrpY)
 <a href="http://www.youtube.com/watch?feature=player_embedded&v=H9FppPDLrpY
 " target="_blank"><img src="http://img.youtube.com/vi/H9FppPDLrpY/0.jpg" 
 alt="Inegst module presentation" width="240" height="180" border="10" /></a>
