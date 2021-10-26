@@ -2,7 +2,7 @@
 Specifications
 ======
 
-_Research into the QNX6 file system in order to develop an Autopsy module to recover data (Full report in French ):_  [QNX6_FileSystem_FullReport_FR](https://github.com/jdbonfils/QNX6-Files-System-Reader-Ingest-Module/blob/master/QNX6_FileSystem_FullReport_FR.pdf)
+_**Research into the QNX6 file system in order to develop an Autopsy module to recover data (Full report in French ):**_  **[QNX6_FileSystem_FullReport_FR - Rapport complet](https://github.com/jdbonfils/QNX6-Files-System-Reader-Ingest-Module/blob/master/QNX6_FileSystem_FullReport_FR.pdf)**
 
 
 This module has been developped for the forensic software Autopsy. It is able to recover data from a QNX6 device and generate the original file tree. It can also recover some deleted files from devices as well. For the time being, the whole image can not be passed to the module. It is necessary at first to extract the partitions.
